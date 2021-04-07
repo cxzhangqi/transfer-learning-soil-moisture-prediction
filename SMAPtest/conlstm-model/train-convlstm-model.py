@@ -1,0 +1,147 @@
+import numpy as np
+from configargparse import ArgParser
+import torch
+import torch.utils.data as Data
+from torch.optim import lr_scheduler
+from torchnet.meter import AverageValueMeter
+from tqdm import tqdm
+from torch.autograd import Variable
+
+
+
+
+class myConvLSTM(torch.nn.Module):
+    def __init__(self, input_size, hidden_dim,height,width, kernel_size=3, stride=3, layer_dim=1):
+        """
+        :param size:一日数据
+        :param day: n日
+        :param hidden_dim:隐藏层神经元
+        :param layer_dim: 隐藏层个数
+        :param output_dim: 输出
+        """
+        super(myConvLSTM, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.layer_dim = layer_dim
+        self.HeightNew = (height - kernel_size) // stride + 1
+        self.WidthNew = (width - kernel_size) // stride + 1
+        self.conv3d = torch.nn.Conv3d(3, 10, kernel_size=(1, kernel_size, kernel_size), stride=(1, kernel_size, kernel_size))
+        self.lstm = torch.nn.LSTM(input_size=10 * self.HeightNew * self.WidthNew, hidden_size=hidden_dim, num_layers=layer_dim, batch_first=True)
+        self.dense = torch.nn.Linear(in_features=hidden_dim,out_features=hidden_dim)
+
+
+    def forward(self, x):
+        print('x',x.shape)
+        x = x.reshape(-1, x.shape[1],x.shape[2], x.shape[3], x.shape[4])
+        x = x.permute(0, 2, 1, 3, 4)
+        x = self.conv3d(x)
+        x = x.permute(0, 2, 1, 3, 4)
+        x = x.reshape(-1, x.shape[1],10 * self.HeightNew * self.WidthNew)
+        x = x.permute(1,0,2)
+        output, (w, y) = self.lstm(x)
+        output = output.permute(1, 0, 2)
+        output = output[:, -1, :]
+        print('output',output.shape)
+        output = self.dense(output)
+        return output
+
+def train_ConvLSTM(net,lr,train_loader,total_epoch):
+    loss_func = torch.nn.MSELoss()
+    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+    s = 1
+    global_step = 1
+    loss_metrics = AverageValueMeter()
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[i for i in range(0, 500, 150)][1:], gamma=0.05)
+    ########## training set##########
+    for epoch in range(total_epoch):
+        epoch_loss = 0
+        for step, (x, y) in tqdm(enumerate(train_loader)):
+            output = net(x)
+            y=y.view(-1,y.shape[1]*y.shape[2])
+            # print('y', y.shape)
+            ##########加mask训练
+            loadData = np.load('../../A.npy')
+            loadData = torch.tensor(loadData.reshape(loadData.shape[0] * loadData.shape[1]),
+                                    dtype=torch.float32).cuda()
+            output = output * loadData
+            y = y * loadData
+            ##########
+            train_loss = loss_func(output, y)
+            optimizer.zero_grad()
+            train_loss.backward()
+            optimizer.step()
+            global_step = global_step + 1
+            epoch_loss += train_loss.item()
+            loss_metrics.add(train_loss.item())
+
+        print("[epcho {}]:loss {}".format(epoch, loss_metrics.value()[0]))
+        loss_metrics.reset()
+        scheduler.step()
+    return net
+
+def main(lr,total_epoch,batch_size,ConvLSTM_num_layers,ConvLSTM_kernel_size,seq_length):
+
+    features_train=np.load('./data-ConLSTM-model/features_train.npy')
+    label_train = np.load('./data-ConLSTM-model/label_train.npy')
+
+
+    # label_train = label_train[:, seq_length-1:seq_length, :, :]
+    print('finished loading  data for ConLSTM model')
+
+    # TODO: transform data for ConLstm  model
+
+    Height = features_train.shape[3]
+    Width = features_train.shape[4]
+    IN_FEATURE = features_train.shape[2] * features_train.shape[3] * features_train.shape[4]
+    OUT_FEATURE = features_train.shape[3] * features_train.shape[4]
+    features_train = torch.tensor(features_train.reshape
+                                  (-1, features_train.shape[1], features_train.shape[2], features_train.shape[3],
+                                   features_train.shape[4])
+                                  , dtype=torch.float32).cuda()
+    label_train = torch.tensor(label_train.reshape
+                               (-1, label_train.shape[1], label_train.shape[2])
+                               , dtype=torch.float32).cuda()
+
+    dataset = Data.TensorDataset(features_train, label_train)
+    train_loader = Data.DataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0
+    )
+    print('finished transforming  data for Con-LSTM model')
+    # TODO: train ConvLSTM model
+
+
+    net = myConvLSTM(input_size=IN_FEATURE, hidden_dim=OUT_FEATURE,height=Height,width=Width,kernel_size=3, stride=3, layer_dim=1)
+
+    net.cuda()
+    # TODO: train LSTM model
+    model = train_ConvLSTM(net, lr, train_loader, total_epoch)
+    print('finished training conv model')
+
+    torch.save(model.state_dict(), './data-ConLSTM-model/convlstm_params.pth')
+
+
+
+
+
+
+if __name__ == '__main__':
+    p = ArgParser()
+    p.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
+    p.add_argument('--total_epoch', type=int, default=30, help='total epochs for training the model')
+    p.add_argument('--ConvLSTM_kernel_size', type=int, default=3, help='kernel size for ConvLSTM model')
+    p.add_argument('--ConvLSTM_num_layers', type=int, default=2, help='numbers of layer for ConvLSTM model')
+    p.add_argument('--batch_size', type=int, default=128, help='batch_size')
+    p.add_argument('--seq_length', type=int, default=3, help='input timesteps for ConLSTM model')
+    args = p.parse_args()
+
+    main(
+        lr=args.lr,
+        ConvLSTM_kernel_size=args.ConvLSTM_kernel_size,
+        ConvLSTM_num_layers=args.ConvLSTM_num_layers,
+        total_epoch=args.total_epoch,
+        batch_size=args.batch_size,
+        seq_length=args.seq_length
+    )
+
