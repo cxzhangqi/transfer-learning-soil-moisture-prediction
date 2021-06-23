@@ -46,12 +46,7 @@ class ConvLSTMCell(nn.Module):
         h_prev, c_prev = prev_state
         #print("h_prev:", h_prev.shape)
         combined = torch.cat((input, h_prev), dim=1)  # concatenate along channel axis
-        # print("input:", input.shape)
-        # print("h_prev:", h_prev.shape)
-        # print("combined:",combined.shape)
-        # input: torch.Size([32, 4, 16, 32])
-        # h_prev: torch.Size([32, 2, 16, 32])
-        # combined: torch.Size([32, 6, 16, 32])
+        
         combined_conv = self.conv(combined)#combined_conv torch.Size([32, 8, 28, 28])
 
         cc_i, cc_f, cc_o, cc_g = torch.split(combined_conv, self.hidden_dim, dim=1)
@@ -128,7 +123,7 @@ class ConvLSTM(nn.Module):
         if not self.batch_first:
             # (t, b, c, h, w) -> (b, t, c, h, w)
             input = input.permute(1, 0, 2, 3, 4)
-            #input.shape3 torch.Size([32, 4, 4, 16, 32])
+         
 
 
         if hidden_state is None:
@@ -162,10 +157,8 @@ class ConvLSTM(nn.Module):
         layer_output = layer_output_list[-1]
         if not self.batch_first:
             layer_output = layer_output.permute(1, 0, 2, 3, 4)
-            layer_output=layer_output[2:3,:,:,:,:]#ppppppppppppppppppppppppppppppppppppppppppppp
-        # print('layer_output',layer_output.shape)
-        # print('last_state_list[0]', last_state_list[0].shape)
-        # print('last_state_list[0]', last_state_list[1].shape)
+            layer_output=layer_output[2:3,:,:,:,:]
+       
         return layer_output, last_state_list
 
     def get_init_states(self, batch_size, cuda=True):
