@@ -12,13 +12,7 @@ import torch.nn.functional as F
 
 class LR(torch.nn.Module):
     def __init__(self, channel_number, output_size):
-        """
-        :param size:一日数据
-        :param day: n日
-        :param hidden_dim:隐藏层神经元
-        :param layer_dim: 隐藏层个数
-        :param output_dim: 输出
-        """
+     
         super(LR, self).__init__()
         self.output_size=output_size
         self.channel_number=channel_number
